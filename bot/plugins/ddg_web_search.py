@@ -1,9 +1,11 @@
 import os
+import time
 from itertools import islice
 from typing import Dict
 
-from duckduckgo_search import DDGS
-
+from ddgs import DDGS
+from ddgs.exceptions import DDGSException
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from .plugin import Plugin
 
 
@@ -46,22 +48,42 @@ class DDGWebSearchPlugin(Plugin):
             },
         }]
 
-    async def execute(self, function_name, helper, **kwargs) -> Dict:
+    @retry(
+        retry=retry_if_exception_type(DDGSException),
+        wait=wait_exponential(multiplier=1, min=2, max=6),
+        stop=stop_after_attempt(2)
+    )
+    def _perform_search(self, query: str, region: str) -> list:
+
+        time.sleep(int(os.environ.get('DICKDUCKGO_TENANCY', 10)))
+
         with DDGS() as ddgs:
             ddgs_gen = ddgs.text(
-                kwargs['query'],
-                region=kwargs.get('region', 'wt-wt'),
-                safesearch=self.safesearch
+                query,
+                region=region,
+                safesearch=self.safesearch,
+                max_results=5
             )
             results = list(islice(ddgs_gen, 3))
+            return results
 
-            if results is None or len(results) == 0:
-                return {"Result": "No good DuckDuckGo Search Result was found"}
+    async def execute(self, function_name, helper, **kwargs) -> Dict:
+        query = kwargs['query']
+        region = kwargs.get('region', 'wt-wt')
 
-            def to_metadata(result: Dict) -> Dict[str, str]:
-                return {
-                    "snippet": result["body"],
-                    "title": result["title"],
-                    "link": result["href"],
-                }
-            return {"result": [to_metadata(result) for result in results]}
+        try:
+            results = self._perform_search(query, region)
+        except DDGSException:
+            return {"Result": "No good DuckDuckGo Search Result was found due to rate limits"}
+
+        if not results:
+            return {"Result": "No good DuckDuckGo Search Result was found"}
+
+        def to_metadata(result: Dict) -> Dict[str, str]:
+            return {
+                "snippet": result.get("body", ""),
+                "title": result.get("title", ""),
+                "link": result.get("href", ""),
+            }
+
+        return {"result": [to_metadata(result) for result in results]}

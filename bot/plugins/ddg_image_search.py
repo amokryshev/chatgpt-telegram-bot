@@ -3,7 +3,7 @@ import random
 from itertools import islice
 from typing import Dict
 
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 from .plugin import Plugin
 
@@ -57,6 +57,7 @@ class DDGImageSearchPlugin(Plugin):
                 region=kwargs.get('region', 'wt-wt'),
                 safesearch=self.safesearch,
                 type_image=image_type,
+                backend="api"
             )
             results = list(islice(ddgs_images_gen, 10))
             if not results or len(results) == 0:
